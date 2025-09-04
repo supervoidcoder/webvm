@@ -1,0 +1,54 @@
+FROM debian:bookworm
+ARG DEBIAN_FRONTEND=noninteractive
+
+# System update and dependencies
+RUN apt-get clean && apt-get update && apt-get -y upgrade
+RUN apt-get -y install apt-utils gcc \
+    python3 vim unzip ruby nodejs \
+    fakeroot dbus base-files whiptail hexedit \
+    patch wamerican ucf manpages \
+    file luajit make lua5.4 dialog curl \
+    less cowsay netcat-openbsd \
+    # GUI components
+    xvfb fluxbox x11-apps \
+    # GUI libraries
+    libgtk-3-0 libnss3 libxss1 libasound2 libxtst6 \
+    # Additional dependencies for Qt6 apps
+    libxcb1 libx11-xcb1 libxcb-icccm4 libxcb-keysyms1
+
+# User setup
+RUN useradd -m user && echo "user:password" | chpasswd
+RUN echo 'root:password' | chpasswd
+
+# Copy examples
+COPY --chown=user:user ./examples /home/user/examples
+RUN chmod -R +x /home/user/examples/lua
+
+# Download and install CEmu
+RUN mkdir -p /home/user/cemu \
+    && curl -L -o /tmp/cemu.zip https://github.com/CE-Programming/CEmu/releases/download/v2.0/CEmu-v2.0_linux_Qt6-static.zip \
+    && unzip /tmp/cemu.zip -d /home/user/cemu \
+    && chmod +x /home/user/cemu/CEmu \
+    && rm /tmp/cemu.zip
+
+# Environment configuration
+WORKDIR /home/user/
+ENV HOME="/home/user" \
+    TERM="xterm" \
+    USER="user" \
+    SHELL="/bin/bash" \
+    EDITOR="vim" \
+    LANG="en_US.UTF-8" \
+    LC_ALL="C" \
+    DISPLAY=":0"
+
+# Startup script for GUI apps
+RUN echo '#!/bin/bash\n\
+Xvfb $DISPLAY -screen 0 1280x1024x24 &\n\
+sleep 2\n\
+fluxbox &\n\
+exec "$@"' > /entrypoint.sh && \
+    chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/bin/bash"]
