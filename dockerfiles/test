@@ -1,40 +1,67 @@
+# ----------------------------------------------------------------------
+# 1️⃣  Base image
+# ----------------------------------------------------------------------
 FROM debian:bookworm
+
+# Turn off interactive prompts (e.g. tzdata)
 ARG DEBIAN_FRONTEND=noninteractive
 
-# System update with cleanup
-RUN apt-get clean && \
+# ----------------------------------------------------------------------
+# 2️⃣  System update + essential packages
+# ----------------------------------------------------------------------
+# All apt commands are kept in one RUN so the package index stays fresh.
+RUN set -eux; \
+    \
     apt-get update && \
     apt-get -y upgrade && \
+    \
+    # The list below is split into logical groups – the backslash before each
+    # comment line prevents the comment from being interpreted as a command.
     apt-get -y install --no-install-recommends \
         apt-utils gcc \
         python3 vim unzip curl \
-        fakeroot dbus-base whiptail hexedit \
+        fakeroot dbus whiptail hexedit \
         patch file make dialog \
         less cowsay netcat-openbsd \
-        # GUI components
+        \
+        # GUI components (Xvfb + window manager)
         xvfb fluxbox x11-apps \
+        \
         # GUI libraries
         libgtk-3-0 libnss3 libxss1 libasound2 libxtst6 \
-        libxcb1 libx11-xcb1 libxcb-icccm4 libxcb-keysyms1 && \
+        libxcb1 libx11-xcb1 libxcb-icccm4 libxcb-keysyms1 \
+    ; \
+    \
+    # Clean up APT caches to keep the image small
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# User setup
-RUN useradd -m user && echo "user:password" | chpasswd && \
-    echo 'root:password' | chpasswd
+# ----------------------------------------------------------------------
+# 3️⃣  Create a non‑root user
+# ----------------------------------------------------------------------
+RUN useradd -m user && \
+    echo "user:password" | chpasswd && \
+    echo "root:password" | chpasswd
 
-# Copy only essential examples
+# ----------------------------------------------------------------------
+# 4️⃣  Copy example scripts (only the needed folder)
+# ----------------------------------------------------------------------
 COPY --chown=user:user ./examples/lua /home/user/examples/lua
 RUN chmod -R +x /home/user/examples/lua
 
-# Download and install CEmu directly
+# ----------------------------------------------------------------------
+# 5️⃣  Download & install CEmu (static Qt6 build)
+# ----------------------------------------------------------------------
 RUN mkdir -p /home/user/cemu && \
-    curl -L -o /tmp/cemu.zip https://github.com/CE-Programming/CEmu/releases/download/v2.0/CEmu-v2.0_linux_Qt6-static.zip && \
+    curl -L -o /tmp/cemu.zip \
+        https://github.com/CE-Programming/CEmu/releases/download/v2.0/CEmu-v2.0_linux_Qt6-static.zip && \
     unzip /tmp/cemu.zip -d /home/user/cemu && \
     chmod +x /home/user/cemu/CEmu && \
-    rm /tmp/cemu.zip
+    rm -f /tmp/cemu.zip
 
-# Environment configuration
+# ----------------------------------------------------------------------
+# 6️⃣  Environment variables & working directory
+# ----------------------------------------------------------------------
 WORKDIR /home/user/
 ENV HOME="/home/user" \
     TERM="xterm" \
@@ -44,11 +71,24 @@ ENV HOME="/home/user" \
     LANG="C.UTF-8" \
     DISPLAY=":0"
 
-# Minimal startup script
-RUN echo '#!/bin/bash\n\
-Xvfb $DISPLAY -screen 0 1024x768x16 &\n\
-fluxbox -display $DISPLAY &\n\
-exec "$@"' > /entrypoint.sh && \
+# ----------------------------------------------------------------------
+# 7️⃣  Minimal X‑session entrypoint
+# ----------------------------------------------------------------------
+RUN cat > /entrypoint.sh <<'EOF'
+#!/bin/bash
+set -e
+
+# Start a headless X server
+Xvfb $DISPLAY -screen 0 1024x768x16 &
+# Give Xvfb a moment to initialise
+sleep 1
+
+# Start a lightweight window manager
+fluxbox -display $DISPLAY &
+
+# Execute whatever the container caller asked for
+exec "$@"
+EOF && \
     chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
